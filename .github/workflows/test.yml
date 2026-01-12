@@ -32,7 +32,13 @@ jobs:
         run: python -m compileall -q lib bin ccb
 
       - name: Run tests
-        run: pytest test/ -v --tb=short
+        run: |
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            pytest test/ -v --tb=short -k "not tmux"
+          else
+            pytest test/ -v --tb=short
+          fi
+        shell: bash
 
       - name: Debug on failure (Windows)
         if: failure() && runner.os == 'Windows'
