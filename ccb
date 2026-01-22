@@ -1701,13 +1701,48 @@ class AILauncher:
 
         return cmd
 
+    def _get_latest_droid_session_id(self) -> tuple[str | None, bool, Path | None]:
+        """
+        Returns (session_id, has_any_history, resume_dir).
+        - session_id: latest Droid session id if found (from session_start).
+        - has_any_history: whether this project has any Droid sessions on disk.
+        - resume_dir: cwd from session_start (if it exists on disk).
+        """
+        try:
+            from droid_comm import DroidLogReader, read_droid_session_start
+        except Exception:
+            return None, False, None
+
+        reader = DroidLogReader(work_dir=self.project_root)
+        session_path = reader.current_session_path()
+        if not session_path or not session_path.exists():
+            return None, False, None
+
+        cwd, session_id = read_droid_session_start(session_path)
+        resume_dir = None
+        if isinstance(cwd, str) and cwd.strip():
+            try:
+                candidate = Path(cwd)
+                if candidate.is_dir():
+                    resume_dir = candidate
+            except Exception:
+                resume_dir = None
+        return session_id or None, True, resume_dir
+
     def _build_droid_start_cmd(self) -> str:
         cmd = (os.environ.get("DROID_START_CMD") or "droid").strip() or "droid"
         resume_cmd = (os.environ.get("DROID_RESUME_CMD") or "").strip()
         if self.resume:
-            if resume_cmd:
-                cmd = resume_cmd
-                print(f"🔁 {t('resuming_session', provider='Droid', session_id='')}")
+            session_id, has_history, resume_dir = self._get_latest_droid_session_id()
+            if has_history:
+                if resume_cmd:
+                    cmd = resume_cmd
+                else:
+                    if resume_dir:
+                        cmd = f"{_build_cd_cmd(resume_dir)}{cmd}"
+                    cmd = f"{cmd} -r"
+                sid_hint = session_id[:8] if session_id else ""
+                print(f"🔁 {t('resuming_session', provider='Droid', session_id=sid_hint)}")
             else:
                 print(f"ℹ️ {t('no_history_fresh', provider='Droid')}")
         return cmd
@@ -3184,10 +3219,60 @@ def cmd_start(args):
     return launcher.run_up()
 
 
+def _find_daemon_pids_by_name(daemon_name: str) -> list[int]:
+    """Find all PIDs of processes matching the daemon name."""
+    pids = []
+    try:
+        if os.name == "nt":
+            result = subprocess.run(
+                ["tasklist", "/FI", f"IMAGENAME eq python*", "/FO", "CSV", "/NH"],
+                capture_output=True, text=True, encoding="utf-8", errors="replace"
+            )
+            # Windows: need to check command line, tasklist doesn't show it
+            # Fall back to checking state files
+            pass
+        else:
+            result = subprocess.run(
+                ["pgrep", "-f", f"bin/{daemon_name}$"],
+                capture_output=True, text=True, encoding="utf-8", errors="replace"
+            )
+            if result.returncode == 0:
+                for line in result.stdout.strip().split("\n"):
+                    line = line.strip()
+                    if line:
+                        try:
+                            pids.append(int(line))
+                        except ValueError:
+                            pass
+    except Exception:
+        pass
+    return pids
+
+
+def _kill_pid(pid: int, force: bool = False) -> bool:
+    """Kill a process by PID. Returns True if successful."""
+    if pid <= 0:
+        return False
+    try:
+        if os.name == "nt":
+            if force:
+                subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True)
+            else:
+                subprocess.run(["taskkill", "/PID", str(pid)], capture_output=True)
+        else:
+            sig = signal.SIGKILL if force else signal.SIGTERM
+            os.kill(pid, sig)
+        return True
+    except Exception:
+        return False
+
+
 def cmd_kill(args):
     providers = _parse_providers(args.providers or ["codex", "gemini", "opencode", "claude", "droid"], allow_unknown=True)
     if not providers:
         return 2
+
+    force = getattr(args, "force", False)
 
     # Map provider names to their client specs to find daemon info
     specs = {
@@ -3234,24 +3319,42 @@ def cmd_kill(args):
         # 2. Kill background daemon
         spec = specs.get(provider)
         if spec:
-            try:
-                # We use the standard state file path logic from askd_runtime
-                st_file = state_file_path(spec.state_file_env if hasattr(spec, 'state_file_env') else f"{spec.protocol_prefix}d.json")
-                # Fallback: client spec doesn't have state_file_name directly, but we can infer or use defaults.
-                # Actually, spec is ProviderClientSpec, which doesn't have state_file_name.
-                # But state_file_path("caskd.json") works if we know the name.
-                # CASK_CLIENT_SPEC.daemon_bin_name is "caskd" -> "caskd.json"
-                daemon_name = spec.daemon_bin_name
-                st_file = state_file_path(f"{daemon_name}.json")
-                
-                if shutdown_daemon(spec.protocol_prefix, 1.0, st_file):
-                    print(f"✅ {daemon_name} daemon shutdown requested")
-                else:
-                    # It might not be running, which is fine.
+            daemon_name = spec.daemon_bin_name
+            st_file = state_file_path(f"{daemon_name}.json")
+            killed_pids = set()
+
+            # Try graceful shutdown first (unless force mode)
+            if not force:
+                try:
+                    if shutdown_daemon(spec.protocol_prefix, 1.0, st_file):
+                        print(f"✅ {daemon_name} daemon shutdown requested")
+                except Exception:
                     pass
-            except Exception as e:
-                # Daemon might not be running or accessible
-                pass
+
+            # If force mode or graceful shutdown might have failed, find and kill all daemon processes
+            if force:
+                # Find all running daemon processes by name
+                pids = _find_daemon_pids_by_name(daemon_name)
+
+                # Also check state file for PID
+                try:
+                    if st_file.exists():
+                        st_data = json.loads(st_file.read_text(encoding="utf-8"))
+                        st_pid = st_data.get("pid")
+                        if st_pid and st_pid not in pids:
+                            pids.append(st_pid)
+                except Exception:
+                    pass
+
+                for pid in pids:
+                    if pid in killed_pids:
+                        continue
+                    if _kill_pid(pid, force=True):
+                        killed_pids.add(pid)
+                        print(f"✅ {daemon_name} (PID {pid}) force killed")
+
+                if not killed_pids:
+                    print(f"ℹ️  {daemon_name}: No running processes found")
 
     return 0
 
@@ -4258,6 +4361,7 @@ def main():
 
         kill_parser = subparsers.add_parser("kill", help="Terminate session")
         kill_parser.add_argument("providers", nargs="*", default=[], help="Backends to terminate (codex/gemini/opencode/claude)")
+        kill_parser.add_argument("-f", "--force", action="store_true", help="Force kill all daemon processes (SIGKILL)")
 
         update_parser = subparsers.add_parser("update", help="Update to latest or specified version")
         update_parser.add_argument("target", nargs="?",
