@@ -32,7 +32,9 @@ $script:SCRIPTS_TO_LINK = @(
   "cask", "caskd", "cpend", "cping",
   "gask", "gaskd", "gpend", "gping",
   "oask", "oaskd", "opend", "oping",
-  "lask", "laskd", "lpend", "lping"
+  "lask", "laskd", "lpend", "lping",
+  "dask", "daskd", "dpend", "dping",
+  "ask", "ping", "pend", "ccb-completion-hook"
 )
 
 $script:CLAUDE_MARKDOWN = @(

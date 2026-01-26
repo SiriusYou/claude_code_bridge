@@ -108,6 +108,9 @@ SCRIPTS_TO_LINK=(
   bin/daskd
   bin/dpend
   bin/dping
+  bin/ask
+  bin/ping
+  bin/pend
   bin/ccb-completion-hook
   ccb
 )
