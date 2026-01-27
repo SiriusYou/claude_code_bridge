@@ -25,6 +25,9 @@ CACHE_DIR = Path(
 LOG_PATH = CACHE_DIR / "mcp-server.log"
 CACHE_TTL_S = int(os.environ.get("CCB_DELEGATION_TTL_S") or str(60 * 60 * 24))
 
+# Detect caller from environment, default to "droid" for factory/droid MCP
+CCB_CALLER = os.environ.get("CCB_CALLER", "droid")
+
 PROVIDERS = {
     "codex": {"ask": "cask", "pend": "cpend", "ping": "cping"},
     "gemini": {"ask": "gask", "pend": "gpend", "ping": "gping"},
@@ -238,6 +241,9 @@ def _write_json(path: Path, data: dict[str, Any]) -> None:
 
 def _spawn_background(cmd: list[str], message: str, meta_path: Path) -> int | None:
     _ensure_cache()
+    # Prepare environment with CCB_CALLER
+    env = os.environ.copy()
+    env["CCB_CALLER"] = CCB_CALLER
     try:
         stderr_handle = LOG_PATH.open("a", encoding="utf-8")
         proc = subprocess.Popen(
@@ -247,6 +253,7 @@ def _spawn_background(cmd: list[str], message: str, meta_path: Path) -> int | No
             stderr=stderr_handle,
             text=True,
             start_new_session=True,
+            env=env,
         )
         try:
             stderr_handle.close()

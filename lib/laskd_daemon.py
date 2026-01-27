@@ -14,6 +14,7 @@ from ccb_protocol import REQ_ID_PREFIX
 from laskd_protocol import (
     LaskdRequest,
     LaskdResult,
+    extract_reply_for_req,
     is_done_text,
     make_req_id,
     strip_done_text,
@@ -236,7 +237,7 @@ class _SessionWorker(BaseSessionWorker[_QueuedTask, LaskdResult]):
                 break
 
         combined = "\n".join(chunks)
-        final_reply = strip_done_text(combined, task.req_id)
+        final_reply = extract_reply_for_req(combined, task.req_id)
 
         if done_seen:
             session_path = state.get("session_path") if isinstance(state, dict) else None

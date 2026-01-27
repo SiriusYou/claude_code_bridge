@@ -1,6 +1,6 @@
 <div align="center">
 
-# Claude Code Bridge (ccb) v5.1.0
+# Claude Code Bridge (ccb) v5.1.1
 
 **基于终端分屏的全新多模型交互协作工具**
 **Claude & Codex & Gemini & OpenCode & Droid**
@@ -11,7 +11,7 @@
   <img src="https://img.shields.io/badge/模型皆可控-CF1322?style=for-the-badge" alt="模型皆可控">
 </p>
 
-[![Version](https://img.shields.io/badge/version-5.1.0-orange.svg)]()
+[![Version](https://img.shields.io/badge/version-5.1.1-orange.svg)]()
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey.svg)]()
 
 [English](README.md) | **中文**

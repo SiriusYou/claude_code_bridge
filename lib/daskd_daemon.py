@@ -19,6 +19,7 @@ from daskd_protocol import (
 )
 from daskd_session import compute_session_key, load_project_session
 from droid_comm import DroidLogReader, read_droid_session_start
+from ccb_protocol import REQ_ID_PREFIX
 from pane_registry import upsert_registry
 from project_id import compute_ccb_project_id
 from terminal import get_backend_for_session
@@ -26,7 +27,6 @@ from askd_runtime import state_file_path, log_path, write_log, random_token
 import askd_rpc
 from askd_server import AskDaemonServer
 from providers import DASKD_SPEC
-from completion_hook import notify_completion
 
 
 def _now_ms() -> int:
@@ -42,6 +42,17 @@ def _read_droid_session_id(session_path: Path) -> str:
         return ""
     _cwd, session_id = read_droid_session_start(session_path)
     return session_id or ""
+
+
+def _tail_state_for_log(log_path: Optional[Path], *, tail_bytes: int) -> dict:
+    if not log_path or not log_path.exists():
+        return {"session_path": log_path if log_path else None, "offset": 0, "carry": b""}
+    try:
+        size = log_path.stat().st_size
+    except OSError:
+        size = 0
+    offset = max(0, size - max(0, int(tail_bytes)))
+    return {"session_path": log_path, "offset": offset, "carry": b""}
 
 
 @dataclass
@@ -63,6 +74,9 @@ class _SessionWorker(BaseSessionWorker[_QueuedTask, DaskdResult]):
             session_key=self.session_key,
             done_seen=False,
             done_ms=None,
+            anchor_seen=False,
+            fallback_scan=False,
+            anchor_ms=None,
         )
 
     def _handle_task(self, task: _QueuedTask) -> DaskdResult:
@@ -80,6 +94,9 @@ class _SessionWorker(BaseSessionWorker[_QueuedTask, DaskdResult]):
                 session_key=self.session_key,
                 done_seen=False,
                 done_ms=None,
+                anchor_seen=False,
+                fallback_scan=False,
+                anchor_ms=None,
             )
 
         ok, pane_or_err = session.ensure_pane()
@@ -91,6 +108,9 @@ class _SessionWorker(BaseSessionWorker[_QueuedTask, DaskdResult]):
                 session_key=self.session_key,
                 done_seen=False,
                 done_ms=None,
+                anchor_seen=False,
+                fallback_scan=False,
+                anchor_ms=None,
             )
         pane_id = pane_or_err
 
@@ -103,6 +123,9 @@ class _SessionWorker(BaseSessionWorker[_QueuedTask, DaskdResult]):
                 session_key=self.session_key,
                 done_seen=False,
                 done_ms=None,
+                anchor_seen=False,
+                fallback_scan=False,
+                anchor_ms=None,
             )
 
         log_reader = DroidLogReader(work_dir=Path(session.work_dir))
@@ -115,42 +138,20 @@ class _SessionWorker(BaseSessionWorker[_QueuedTask, DaskdResult]):
             log_reader.set_session_id_hint(session.droid_session_id)
         state = log_reader.capture_state()
 
-        try:
-            session_path = state.get("session_path")
-            session_id = _read_droid_session_id(session_path) if isinstance(session_path, Path) else ""
-            session.update_droid_binding(session_path=session_path if isinstance(session_path, Path) else None, session_id=session_id or None)
-            ccb_pid = str(session.data.get("ccb_project_id") or "").strip()
-            if not ccb_pid:
-                ccb_pid = compute_ccb_project_id(Path(session.work_dir))
-            ccb_session_id = str(session.data.get("ccb_session_id") or session.data.get("session_id") or "").strip()
-            if ccb_session_id:
-                upsert_registry(
-                    {
-                        "ccb_session_id": ccb_session_id,
-                        "ccb_project_id": ccb_pid or None,
-                        "work_dir": str(session.work_dir),
-                        "terminal": session.terminal,
-                        "providers": {
-                            "droid": {
-                                "pane_id": session.pane_id or None,
-                                "pane_title_marker": session.pane_title_marker or None,
-                                "session_file": str(session.session_file),
-                                "droid_session_id": session.data.get("droid_session_id"),
-                                "droid_session_path": session.data.get("droid_session_path"),
-                            }
-                        },
-                    }
-                )
-        except Exception:
-            pass
-
         prompt = wrap_droid_prompt(req.message, task.req_id)
         backend.send_text(pane_id, prompt)
 
         deadline = None if float(req.timeout_s) < 0.0 else (time.time() + float(req.timeout_s))
+        chunks: list[str] = []
+        anchor_seen = False
+        fallback_scan = False
+        anchor_ms: int | None = None
         done_seen = False
         done_ms: int | None = None
-        latest_reply = ""
+        anchor_grace_deadline = min(deadline, time.time() + 1.5) if deadline is not None else (time.time() + 1.5)
+        anchor_collect_grace = min(deadline, time.time() + 2.0) if deadline is not None else (time.time() + 2.0)
+        rebounded = False
+        tail_bytes = int(os.environ.get("CCB_DASKD_REBIND_TAIL_BYTES", str(1024 * 1024 * 2)) or (1024 * 1024 * 2))
 
         pane_check_interval = float(os.environ.get("CCB_DASKD_PANE_CHECK_INTERVAL", "2.0") or "2.0")
         last_pane_check = time.time()
@@ -160,9 +161,9 @@ class _SessionWorker(BaseSessionWorker[_QueuedTask, DaskdResult]):
                 remaining = deadline - time.time()
                 if remaining <= 0:
                     break
-                wait_step = min(remaining, 1.0)
+                wait_step = min(remaining, 0.5)
             else:
-                wait_step = 1.0
+                wait_step = 0.5
 
             if time.time() - last_pane_check >= pane_check_interval:
                 try:
@@ -178,38 +179,93 @@ class _SessionWorker(BaseSessionWorker[_QueuedTask, DaskdResult]):
                         session_key=self.session_key,
                         done_seen=False,
                         done_ms=None,
+                        anchor_seen=anchor_seen,
+                        fallback_scan=fallback_scan,
+                        anchor_ms=anchor_ms,
                     )
                 last_pane_check = time.time()
 
-            reply, state = log_reader.wait_for_message(state, wait_step)
-            if not reply:
+            events, state = log_reader.wait_for_events(state, wait_step)
+            if not events:
+                if (not rebounded) and (not anchor_seen) and time.time() >= anchor_grace_deadline:
+                    log_reader = DroidLogReader(work_dir=Path(session.work_dir))
+                    log_hint = log_reader.current_session_path()
+                    state = _tail_state_for_log(log_hint, tail_bytes=tail_bytes)
+                    fallback_scan = True
+                    rebounded = True
                 continue
-            latest_reply = str(reply)
-            if is_done_text(latest_reply, task.req_id):
-                done_seen = True
-                done_ms = _now_ms() - started_ms
+
+            for role, text in events:
+                if role == "user":
+                    if f"{REQ_ID_PREFIX} {task.req_id}" in text:
+                        anchor_seen = True
+                        if anchor_ms is None:
+                            anchor_ms = _now_ms() - started_ms
+                    continue
+                if role != "assistant":
+                    continue
+                if (not anchor_seen) and time.time() < anchor_collect_grace:
+                    continue
+                chunks.append(text)
+                combined = "\n".join(chunks)
+                if is_done_text(combined, task.req_id):
+                    done_seen = True
+                    done_ms = _now_ms() - started_ms
+                    break
+
+            if done_seen:
                 break
 
-        final_reply = extract_reply_for_req(latest_reply, task.req_id)
+        combined = "\n".join(chunks)
+        final_reply = extract_reply_for_req(combined, task.req_id)
 
-        # Notify Claude via completion hook (async)
-        notify_completion(
-            provider="droid",
-            output_file=task.request.output_path,
-            reply=final_reply,
-            req_id=task.req_id,
-            done_seen=done_seen,
-            caller=task.request.caller or "claude",
-        )
+        if done_seen:
+            session_path = state.get("session_path") if isinstance(state, dict) else None
+            session_id = _read_droid_session_id(session_path) if isinstance(session_path, Path) else ""
+            session.update_droid_binding(session_path=session_path if isinstance(session_path, Path) else None, session_id=session_id or None)
+            try:
+                ccb_pid = str(session.data.get("ccb_project_id") or "").strip()
+                if not ccb_pid:
+                    ccb_pid = compute_ccb_project_id(Path(session.work_dir))
+                ccb_session_id = str(session.data.get("ccb_session_id") or session.data.get("session_id") or "").strip()
+                if ccb_session_id:
+                    upsert_registry(
+                        {
+                            "ccb_session_id": ccb_session_id,
+                            "ccb_project_id": ccb_pid or None,
+                            "work_dir": str(session.work_dir),
+                            "terminal": session.terminal,
+                            "providers": {
+                                "droid": {
+                                    "pane_id": session.pane_id or None,
+                                    "pane_title_marker": session.pane_title_marker or None,
+                                    "session_file": str(session.session_file),
+                                    "droid_session_id": session.data.get("droid_session_id"),
+                                    "droid_session_path": session.data.get("droid_session_path"),
+                                }
+                            },
+                        }
+                    )
+            except Exception:
+                pass
 
-        return DaskdResult(
+        result = DaskdResult(
             exit_code=0 if done_seen else 2,
             reply=final_reply,
             req_id=task.req_id,
             session_key=self.session_key,
             done_seen=done_seen,
             done_ms=done_ms,
+            anchor_seen=anchor_seen,
+            fallback_scan=fallback_scan,
+            anchor_ms=anchor_ms,
         )
+        _write_log(
+            f"[INFO] done session={self.session_key} req_id={task.req_id} exit={result.exit_code} "
+            f"anchor={result.anchor_seen} done={result.done_seen} fallback={result.fallback_scan} "
+            f"anchor_ms={result.anchor_ms or ''} done_ms={result.done_ms or ''}"
+        )
+        return result
 
 
 class _WorkerPool:
@@ -270,6 +326,9 @@ class DaskdServer:
                     "session_key": result.session_key,
                     "done_seen": result.done_seen,
                     "done_ms": result.done_ms,
+                    "anchor_seen": result.anchor_seen,
+                    "fallback_scan": result.fallback_scan,
+                    "anchor_ms": result.anchor_ms,
                 },
             }
 

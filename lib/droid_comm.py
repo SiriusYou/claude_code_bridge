@@ -294,6 +294,12 @@ class DroidLogReader:
     def try_get_message(self, state: Dict[str, Any]) -> Tuple[Optional[str], Dict[str, Any]]:
         return self._read_since(state, timeout=0.0, block=False)
 
+    def wait_for_events(self, state: Dict[str, Any], timeout: float) -> Tuple[List[Tuple[str, str]], Dict[str, Any]]:
+        return self._read_since_events(state, timeout=timeout, block=True)
+
+    def try_get_events(self, state: Dict[str, Any]) -> Tuple[List[Tuple[str, str]], Dict[str, Any]]:
+        return self._read_since_events(state, timeout=0.0, block=False)
+
     def latest_message(self) -> Optional[str]:
         session = self._latest_session()
         if not session or not session.exists():
@@ -411,6 +417,78 @@ class DroidLogReader:
 
         new_state = {"session_path": session, "offset": new_offset, "carry": carry}
         return latest, new_state
+
+    def _read_since_events(self, state: Dict[str, Any], timeout: float, block: bool) -> Tuple[List[Tuple[str, str]], Dict[str, Any]]:
+        deadline = time.time() + max(0.0, float(timeout)) if block else time.time()
+        current_state = dict(state or {})
+
+        while True:
+            session = self._latest_session()
+            if session is None or not session.exists():
+                if not block or time.time() >= deadline:
+                    return [], current_state
+                time.sleep(self._poll_interval)
+                continue
+
+            if current_state.get("session_path") != session:
+                current_state["session_path"] = session
+                current_state["offset"] = 0
+                current_state["carry"] = b""
+
+            events, current_state = self._read_new_events(session, current_state)
+            if events:
+                return events, current_state
+
+            if not block or time.time() >= deadline:
+                return [], current_state
+            time.sleep(self._poll_interval)
+
+    def _read_new_events(self, session: Path, state: Dict[str, Any]) -> Tuple[List[Tuple[str, str]], Dict[str, Any]]:
+        offset = int(state.get("offset") or 0)
+        carry = state.get("carry") or b""
+        try:
+            size = session.stat().st_size
+        except OSError:
+            return [], state
+
+        if size < offset:
+            offset = 0
+            carry = b""
+
+        try:
+            with session.open("rb") as handle:
+                handle.seek(offset)
+                data = handle.read()
+        except OSError:
+            return [], state
+
+        new_offset = offset + len(data)
+        buf = carry + data
+        lines = buf.split(b"\n")
+        if buf and not buf.endswith(b"\n"):
+            carry = lines.pop()
+        else:
+            carry = b""
+
+        events: List[Tuple[str, str]] = []
+        for raw in lines:
+            line = raw.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line.decode("utf-8", errors="replace"))
+            except Exception:
+                continue
+            user_msg = _extract_message(entry, "user")
+            if user_msg:
+                events.append(("user", user_msg))
+                continue
+            assistant_msg = _extract_message(entry, "assistant")
+            if assistant_msg:
+                events.append(("assistant", assistant_msg))
+
+        new_state = {"session_path": session, "offset": new_offset, "carry": carry}
+        return events, new_state
 
 
 class DroidCommunicator:

@@ -17,28 +17,30 @@ The first argument must be the provider name. The message MUST be provided via s
 - `codex` - Send to Codex
 - `opencode` - Send to OpenCode
 - `droid` - Send to Droid
+- `claude` - Send to Claude
 
 ## Execution (MANDATORY)
 
 ```bash
-CCB_CALLER=droid ask $PROVIDER <<'EOF'
+CCB_CALLER=droid command ask "$PROVIDER" <<'EOF'
 $MESSAGE
 EOF
 ```
 
 ## Rules
 
-- After running the command, say "[Provider] processing..." and immediately end your turn.
+- STRICT: Execute the bash snippet in the Execution section, then immediately end your turn.
+- Do not run any other commands/tools besides this snippet (no `gask/cask/oask/lask/dask`, no `pend`, no `ping`, no retries) unless the user explicitly asks.
+- Do not add any extra commentary/output (including "processing..."); the `ask` command already prints the task id and log path.
 - Do not wait for results or check status in the same turn.
-- The task ID and log file path will be displayed for tracking.
 
 ## Examples
 
 - `/ask gemini What is 12+12?` (send via heredoc)
-- `CCB_CALLER=droid ask gemini <<'EOF'`
+- `CCB_CALLER=droid command ask gemini <<'EOF'`
   `What is 12+12?`
   `EOF`
 
 ## Notes
 
-- If it fails, check backend health with the corresponding ping command (`ping <provider>` (e.g., `ping gemini`)).
+- If it fails, stop after reporting the failure output; only run diagnostics in a new turn if the user requests it.

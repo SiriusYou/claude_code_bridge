@@ -1,6 +1,6 @@
 <div align="center">
 
-# Claude Code Bridge (ccb) v5.1.0
+# Claude Code Bridge (ccb) v5.1.1
 
 **New Multi-Model Collaboration Tool via Split-Pane Terminal**
 **Claude & Codex & Gemini & OpenCode & Droid**
@@ -11,7 +11,7 @@
   <img src="https://img.shields.io/badge/Every_Model_Controllable-CF1322?style=for-the-badge" alt="Every Model Controllable">
 </p>
 
-[![Version](https://img.shields.io/badge/version-5.1.0-orange.svg)]()
+[![Version](https://img.shields.io/badge/version-5.1.1-orange.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![CI](https://github.com/bfly123/claude_code_bridge/actions/workflows/test.yml/badge.svg)](https://github.com/bfly123/claude_code_bridge/actions/workflows/test.yml)

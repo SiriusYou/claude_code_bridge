@@ -111,6 +111,7 @@ SCRIPTS_TO_LINK=(
   bin/ask
   bin/ping
   bin/pend
+  bin/autonew
   bin/ccb-completion-hook
   ccb
 )
@@ -601,7 +602,7 @@ install_claude_commands() {
 }
 
 install_claude_skills() {
-  local skills_src="$REPO_ROOT/skills"
+  local skills_src="$REPO_ROOT/claude_skills"
   local skills_dst="$HOME/.claude/skills"
 
   if [[ ! -d "$skills_src" ]]; then

@@ -124,3 +124,6 @@ class DaskdResult:
     session_key: str
     done_seen: bool
     done_ms: int | None = None
+    anchor_seen: bool = False
+    fallback_scan: bool = False
+    anchor_ms: int | None = None
