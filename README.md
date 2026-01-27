@@ -69,7 +69,7 @@
 - UTF-8 BOM handling for PowerShell compatibility
 
 **📦 New Skills:**
-- `/ask <provider> <message>` - Async request to AI provider
+- `/ask <provider> <message>` - Request to AI provider (background by default)
 - `/ping <provider>` - Test provider connectivity
 - `/pend <provider> [N]` - View latest provider reply
 
@@ -471,11 +471,13 @@ Once started, collaborate naturally. Claude will detect when to delegate tasks.
 - `cpend/gpend/opend/dpend/lpend` - Independent pend commands
 
 ### Unified Commands
-- **`ask <provider> <message>`** - Unified asynchronous request
+- **`ask <provider> <message>`** - Unified request (background by default)
   - Supports: `gemini`, `codex`, `opencode`, `droid`, `claude`
-  - Runs in background; triggers completion hook upon finish
-  - Supports `--notify` for synchronous notifications
-  - Supports `CCB_CALLER` env var to specify the caller
+  - Defaults to background; managed Codex sessions prefer foreground to avoid cleanup
+  - Override with `--foreground` / `--background` or `CCB_ASK_FOREGROUND=1` / `CCB_ASK_BACKGROUND=1`
+  - Foreground uses sync send and disables completion hook unless `CCB_COMPLETION_HOOK_ENABLED` is set
+  - Supports `--notify` for short synchronous notifications
+  - Supports `CCB_CALLER` (default: `codex` in Codex sessions, otherwise `claude`)
 
 - **`ping <provider>`** - Unified connectivity test
   - Checks if the specified provider's daemon is online
@@ -485,7 +487,7 @@ Once started, collaborate naturally. Claude will detect when to delegate tasks.
   - Optional N specifies number of recent messages
 
 ### Skills System
-- `/ask <provider> <message>` - Asynchronous request skill
+- `/ask <provider> <message>` - Request skill (background by default; foreground in managed Codex sessions)
 - `/ping <provider>` - Connectivity test skill
 - `/pend <provider>` - Reply fetch skill
 
@@ -498,6 +500,7 @@ Once started, collaborate naturally. Claude will detect when to delegate tasks.
 - Notifies caller upon task completion
 - Supports `CCB_CALLER` targeting (`claude`/`codex`/`droid`)
 - Compatible with both tmux and WezTerm backends
+ - Foreground ask suppresses the hook unless `CCB_COMPLETION_HOOK_ENABLED` is set
 
 ---
 

@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### 🔧 ask Foreground Defaults
+
+- `bin/ask`: Foreground mode available via `--foreground`; `--background` forces legacy async
+- Managed Codex sessions default to foreground to avoid background cleanup
+- Environment overrides: `CCB_ASK_FOREGROUND=1` / `CCB_ASK_BACKGROUND=1`
+- Foreground runs sync and suppresses completion hook unless `CCB_COMPLETION_HOOK_ENABLED` is set
+- `CCB_CALLER` now defaults to `codex` in Codex sessions when unset
+
 ## v5.1.0 (2025-01-26)
 
 ### 🚀 Major Changes: Unified Command System

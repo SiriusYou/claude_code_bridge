@@ -70,7 +70,7 @@
 - UTF-8 BOM 处理，兼容 PowerShell 生成的文件
 
 **📦 新技能：**
-- `/ask <provider> <message>` - 异步请求 AI provider
+- `/ask <provider> <message>` - 请求 AI provider（默认后台）
 - `/ping <provider>` - 测试 provider 连通性
 - `/pend <provider> [N]` - 查看最新回复
 
@@ -502,11 +502,13 @@ echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zprofile
 - `cpend/gpend/opend/dpend/lpend` - 各 provider 独立的 pend 命令
 
 ### 新统一命令
-- **`ask <provider> <message>`** - 统一的异步请求命令
+- **`ask <provider> <message>`** - 统一请求命令（默认后台）
   - 支持 provider: `gemini`, `codex`, `opencode`, `droid`, `claude`
-  - 自动后台执行，完成后通过 completion hook 回调
-  - 支持 `--notify` 模式用于同步通知
-  - 支持 `CCB_CALLER` 环境变量指定发起者
+  - 默认后台；在 Codex 托管环境优先前台执行以避免后台被清理
+  - 可用 `--foreground` / `--background` 或 `CCB_ASK_FOREGROUND=1` / `CCB_ASK_BACKGROUND=1` 覆盖
+  - 前台执行使用同步发送，默认关闭 completion hook（除非设置 `CCB_COMPLETION_HOOK_ENABLED`）
+  - 支持 `--notify` 用于短消息同步通知
+  - 支持 `CCB_CALLER` 指定发起者（Codex 环境默认 codex，其它默认 claude）
 
 - **`ping <provider>`** - 统一的连通性测试命令
   - 测试指定 provider 的 daemon 是否在线
@@ -516,7 +518,7 @@ echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zprofile
   - 可选参数 N 指定查看最近 N 条
 
 ### 技能系统 (Skills)
-- `/ask <provider> <message>` - 异步请求技能
+- `/ask <provider> <message>` - 请求技能（默认后台；Codex 托管环境前台）
 - `/ping <provider>` - 连通性测试技能
 - `/pend <provider>` - 查看回复技能
 
@@ -529,6 +531,7 @@ echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zprofile
 - 任务完成后自动通知发起者
 - 支持 `CCB_CALLER` 指定回调目标 (claude/codex/droid)
 - 支持 tmux 和 WezTerm 两种终端后端
+ - 前台 ask 默认关闭 hook，除非设置 `CCB_COMPLETION_HOOK_ENABLED`
 
 ---
 

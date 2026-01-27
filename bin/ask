@@ -11,6 +11,8 @@ Providers:
 Modes:
     Default (async):  Background task with hook callback
     --notify:         Sync send, no wait for reply (for notifications)
+    --foreground:     Run in foreground (no nohup/background)
+    --background:     Force background mode
 
 Examples:
     ask gemini "12+12=?"
@@ -46,6 +48,39 @@ PROVIDER_DAEMONS = {
 }
 
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    val = (os.environ.get(name) or "").strip().lower()
+    if not val:
+        return default
+    return val not in ("0", "false", "no", "off")
+
+
+def _default_foreground() -> bool:
+    # Allow explicit override to keep legacy background behavior.
+    if _env_bool("CCB_ASK_BACKGROUND", False):
+        return False
+    if _env_bool("CCB_ASK_FOREGROUND", False):
+        return True
+    # Managed Codex tool environments clean up background processes aggressively.
+    if _env_bool("CCB_MANAGED", False):
+        return True
+    # Fallback: if Codex session markers exist, prefer foreground.
+    if os.environ.get("CODEX_SESSION_ID") or os.environ.get("CODEX_RUNTIME_DIR"):
+        return True
+    return False
+
+
+def _default_caller() -> str:
+    caller = (os.environ.get("CCB_CALLER") or "").strip()
+    if caller:
+        return caller
+    if _env_bool("CCB_MANAGED", False):
+        return "codex"
+    if os.environ.get("CODEX_SESSION_ID") or os.environ.get("CODEX_RUNTIME_DIR"):
+        return "codex"
+    return "claude"
+
+
 def make_task_id() -> str:
     """Generate task ID: YYYYMMDD-HHMMSS-mmm-PID"""
     now = datetime.now()
@@ -63,6 +98,8 @@ def _usage() -> None:
     print("  -h, --help              Show this help message", file=sys.stderr)
     print("  -t, --timeout SECONDS   Request timeout (default: 3600)", file=sys.stderr)
     print("  --notify                Sync send, no wait for reply (for notifications)", file=sys.stderr)
+    print("  --foreground            Run in foreground (no nohup/background)", file=sys.stderr)
+    print("  --background            Force background mode", file=sys.stderr)
     print("  --no-wrap               Don't wrap with CCB protocol markers", file=sys.stderr)
 
 
@@ -89,6 +126,7 @@ def main(argv: list[str]) -> int:
     timeout: float = 3600.0
     notify_mode = False
     no_wrap = False
+    foreground_mode = _default_foreground()
     parts: list[str] = []
 
     it = iter(argv[2:])
@@ -108,6 +146,12 @@ def main(argv: list[str]) -> int:
             continue
         if token == "--notify":
             notify_mode = True
+            continue
+        if token == "--foreground":
+            foreground_mode = True
+            continue
+        if token == "--background":
+            foreground_mode = False
             continue
         if token == "--no-wrap":
             no_wrap = True
@@ -141,6 +185,24 @@ def main(argv: list[str]) -> int:
             print(f"[ERROR] {e}", file=sys.stderr)
             return EXIT_ERROR
 
+    # Foreground mode: run provider directly (avoid background cleanup in managed envs)
+    if foreground_mode:
+        cmd = [daemon_cmd, "--sync", "--timeout", str(timeout)]
+        if no_wrap and provider == "claude":
+            cmd.append("--no-wrap")
+        env = os.environ.copy()
+        if not env.get("CCB_CALLER"):
+            env["CCB_CALLER"] = _default_caller()
+        # In sync mode, suppress completion hook unless explicitly enabled.
+        if "CCB_COMPLETION_HOOK_ENABLED" not in env:
+            env["CCB_COMPLETION_HOOK_ENABLED"] = "0"
+        try:
+            result = subprocess.run(cmd, input=message, text=True, env=env)
+            return result.returncode
+        except Exception as e:
+            print(f"[ERROR] {e}", file=sys.stderr)
+            return EXIT_ERROR
+
     # Default async mode: background task with hook callback
     task_id = make_task_id()
     log_dir = Path(tempfile.gettempdir()) / "ccb-tasks"
@@ -148,7 +210,7 @@ def main(argv: list[str]) -> int:
     log_file = log_dir / f"ask-{provider}-{task_id}.log"
 
     # Detect caller from environment or default to "claude"
-    caller = os.environ.get("CCB_CALLER", "claude")
+    caller = _default_caller()
 
     # Platform-specific background execution
     if os.name == "nt":

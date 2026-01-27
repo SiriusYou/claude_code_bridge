@@ -1,13 +1,13 @@
 ---
 name: ask
-description: Async via ask, end turn immediately; use when user explicitly delegates to any AI provider (gemini/codex/opencode/droid); NOT for questions about the providers themselves.
+description: Send via ask, end turn immediately; use when user explicitly delegates to any AI provider (gemini/codex/opencode/droid); NOT for questions about the providers themselves.
 metadata:
   short-description: Ask AI provider asynchronously
 ---
 
-# Ask AI Provider (Async)
+# Ask AI Provider
 
-Send the user's request to specified AI provider asynchronously.
+Send the user's request to the specified AI provider via ask.
 
 ## Usage
 
@@ -17,6 +17,9 @@ The first argument must be the provider name. The message MUST be provided via s
 - `codex` - Send to Codex
 - `opencode` - Send to OpenCode
 - `droid` - Send to Droid
+Optional flags after the provider:
+- `--foreground` / `--background`
+- Env overrides: `CCB_ASK_FOREGROUND=1` / `CCB_ASK_BACKGROUND=1`
 
 ## Execution (MANDATORY)
 
@@ -42,3 +45,4 @@ EOF
 ## Notes
 
 - If it fails, check backend health with the corresponding ping command (`ping <provider>` (e.g., `ping gemini`)).
+- Codex-managed sessions default to foreground; use `--background` or `CCB_ASK_BACKGROUND=1` for async.
