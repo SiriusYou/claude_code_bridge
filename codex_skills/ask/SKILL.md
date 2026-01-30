@@ -14,7 +14,7 @@ Send the user's request to the specified AI provider via ask.
 The first argument must be the provider name. The message MUST be provided via stdin
 (heredoc or pipe), not as CLI arguments, to avoid shell globbing issues:
 - `gemini` - Send to Gemini
-- `codex` - Send to Codex
+- `claude` - Send to Claude
 - `opencode` - Send to OpenCode
 - `droid` - Send to Droid
 Optional flags after the provider:

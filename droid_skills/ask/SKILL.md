@@ -16,7 +16,6 @@ The first argument must be the provider name. The message MUST be provided via s
 - `gemini` - Send to Gemini
 - `codex` - Send to Codex
 - `opencode` - Send to OpenCode
-- `droid` - Send to Droid
 - `claude` - Send to Claude
 Optional flags after the provider:
 - `--foreground` / `--background`

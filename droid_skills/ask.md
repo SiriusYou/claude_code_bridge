@@ -15,7 +15,7 @@ EOF
 ## Examples
 
 - `/ask gemini What is 12+12?` (send via heredoc)
-- `CCB_CALLER=claude ask gemini <<'EOF'`
+- `CCB_CALLER=droid ask gemini <<'EOF'`
   `What is 12+12?`
   `EOF`
 

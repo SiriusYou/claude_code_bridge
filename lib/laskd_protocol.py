@@ -104,6 +104,8 @@ def wrap_claude_prompt(message: str, req_id: str) -> str:
         f"{message}\n\n"
         "IMPORTANT:\n"
         "- Reply with an execution summary, in English. Do not stay silent.\n"
+        "- Respond in the main assistant only (no subagents/sidechains/tools).\n"
+        "- Ensure the final CCB_DONE line is in the main assistant response.\n"
         "- End your reply with this exact final line (verbatim, on its own line):\n"
         f"{DONE_PREFIX} {req_id}\n"
     )
